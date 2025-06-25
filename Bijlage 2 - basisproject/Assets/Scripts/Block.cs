@@ -1,62 +1,75 @@
-using Unity.Android.Gradle.Manifest;
+using Unity.Android.Gradle.Manifest; // Likely unnecessary – probably left in by accident
 using UnityEngine;
 using UnityEngine.UIElements;
 
 public class Block : MonoBehaviour
 {
+    // Reference to the board this block is on
     public Board board { get; private set; }
 
-    // Gegevens over de vorm
+    // Shape and wall kick data of this tetromino
     public TetrominoData data { get; private set; }
-   
-    //de vier blokjes waaruit een tetromino bestaat
+
+    // The four tiles that make up a tetromino
     public Vector3Int[] cells { get; private set; }
+
+    // The current grid position of the block (used as the pivot)
     public Vector3Int position { get; private set; }
+
+    // The current rotation index (0–3)
     public int rotationIndex { get; private set; }
+
+    // Time between each automatic downward step
     public float stepDelay = 1f;
+
+    // Time before the piece locks in place after hitting something
     public float lockDelay = 0.5f;
 
-    private float stepTime;
-    private float lockTime;
+    private float stepTime; // Time to perform the next automatic step
+    private float lockTime; // Timer to track how long the block has been still
 
-    // Initialiseer het blok met een bord, positie en tetromino-data
+    // Called when the block is created
     public void Initialize(Board board, Vector3Int position, TetrominoData data)
     {
         this.board = board;
         this.position = position;
         this.data = data;
-        this.rotationIndex = 0;
-        this.stepTime = Time.time + stepDelay;
-        this.lockTime = 0f;
+        rotationIndex = 0;
+        stepTime = Time.time + stepDelay;
+        lockTime = 0f;
 
-        // Als de cellen-array nog niet bestaat, maak hem aan
-        if (this.cells == null)
+        // Initialize the cells array if not already done
+        if (cells == null)
         {
-            this.cells = new Vector3Int[data.cells.Length];
+            cells = new Vector3Int[data.cells.Length];
         }
 
-        // Kopieer de celposities uit de tetromino-data
+        // Copy the base cell positions from the data (no rotation applied yet)
         for (int i = 0; i < data.cells.Length; i++)
         {
-            this.cells[i] = (Vector3Int)data.cells[i];
+            cells[i] = (Vector3Int)data.cells[i];
         }
     }
+
     public void Update()
     {
-        this.board.Clear(this);
+        // Remove the block from the board temporarily to test moves
+        board.Clear(this);
 
-        this.lockTime += Time.deltaTime;
+        // Track how long we've been sitting still
+        lockTime += Time.deltaTime;
 
+        // Handle rotation input
         if (Input.GetKeyDown(KeyCode.Z))
         {
-            Rotate(-1);
+            Rotate(-1); // Rotate counterclockwise
         }
         else if (Input.GetKeyDown(KeyCode.X))
         {
-            Rotate(1);
+            Rotate(1); // Rotate clockwise
         }
 
-
+        // Handle horizontal/vertical movement input
         if (Input.GetKeyDown(KeyCode.LeftArrow))
         {
             Move(Vector2Int.left);
@@ -71,57 +84,93 @@ public class Block : MonoBehaviour
         }
         else if (Input.GetKeyDown(KeyCode.Space))
         {
-            //hard drop, moves down untill it cant anymore
-            while (Move(Vector2Int.down))
-            {
-                continue;
-            }
+            // Hard drop: move the block down until it can't move anymore
+            while (Move(Vector2Int.down)) continue;
         }
-            this.board.Set(this);
+
+        // Handle automatic downward step
+        if (Time.time >= stepTime)
+        {
+            Step();
+        }
+
+        // Re-draw the block in its new position
+        board.Set(this);
     }
+
+    // Attempt to move the block in a direction (returns true if successful)
     private bool Move(Vector2Int movement)
     {
-        Vector3Int newPosition = this.position; 
+        Vector3Int newPosition = position;
         newPosition.x += movement.x;
         newPosition.y += movement.y;
-        bool valid = this.board.IsValidPosition(this, newPosition);
-        if (valid) 
+
+        // Check if the new position is valid
+        bool valid = board.IsValidPosition(this, newPosition);
+        if (valid)
         {
-            this.position = newPosition;
-            lockTime = 0f;
+            position = newPosition;
+            lockTime = 0f; // Reset lock timer if we moved
         }
+
         return valid;
     }
+
+    // Called when it's time to automatically move the block down
+    private void Step()
+    {
+        stepTime = Time.time + stepDelay;
+
+        Move(Vector2Int.down);
+
+        // Lock the block if it's been still for long enough
+        if (lockTime >= lockDelay)
+        {
+            Lock();
+        }
+    }
+
+    // Finalizes the block's position and spawns a new one
+    private void Lock()
+    {
+        board.Set(this);      // Lock in the block
+        board.ClearLines();   // Check and clear any full lines
+        board.SpawnPiece();   // Spawn the next block
+    }
+
+    // Rotates the block clockwise or counterclockwise
     private void Rotate(int direction)
     {
-        int fromRotation = this.rotationIndex;
-        int toRotation = Wrap(this.rotationIndex + direction, 0, 4);
+        int fromRotation = rotationIndex;
+        int toRotation = Wrap(rotationIndex + direction, 0, 4);
+        rotationIndex = toRotation;
 
-        this.rotationIndex = toRotation;
         ApplyRotation(direction);
 
+        // Try wall kicks to make the rotation fit
         if (!TestWallKicks(fromRotation, toRotation))
         {
-            this.rotationIndex = fromRotation;
+            // If all wall kicks failed, revert the rotation
+            rotationIndex = fromRotation;
             ApplyRotation(-direction);
         }
     }
+
+    // Actually rotate the cells using a rotation matrix
     private void ApplyRotation(int direction)
     {
         float[] matrix = Data.RotationMatrix;
 
-        // draai alle cells aan de hand van een rotation matrix
         for (int i = 0; i < cells.Length; i++)
         {
             Vector3 cell = cells[i];
-
             int x, y;
 
             switch (data.tetromino)
             {
                 case Tetromino.I:
                 case Tetromino.O:
-                    // "I" en "O" worden anders gedraaid vanwege dat ze geen center point hebben
+                    // These shapes rotate around a half-cell pivot
                     cell.x -= 0.5f;
                     cell.y -= 0.5f;
                     x = Mathf.CeilToInt((cell.x * matrix[0] * direction) + (cell.y * matrix[1] * direction));
@@ -129,6 +178,7 @@ public class Block : MonoBehaviour
                     break;
 
                 default:
+                    // Most pieces rotate around their center
                     x = Mathf.RoundToInt((cell.x * matrix[0] * direction) + (cell.y * matrix[1] * direction));
                     y = Mathf.RoundToInt((cell.x * matrix[2] * direction) + (cell.y * matrix[3] * direction));
                     break;
@@ -137,6 +187,8 @@ public class Block : MonoBehaviour
             cells[i] = new Vector3Int(x, y, 0);
         }
     }
+
+    // Try each wall kick position for a rotation
     private bool TestWallKicks(int from, int to)
     {
         int wallKickIndex = GetWallKickIndex(from, to);
@@ -146,13 +198,14 @@ public class Block : MonoBehaviour
             Vector2Int translation = data.wallKicks[wallKickIndex, i];
             if (Move(translation))
             {
-                return true;
+                return true; // Found a valid position after wall kick
             }
         }
 
         return false;
     }
 
+    // Determine which wall kick data to use based on rotation change
     private int GetWallKickIndex(int from, int to)
     {
         if (from == 0 && to == 1) return 0;
@@ -164,8 +217,10 @@ public class Block : MonoBehaviour
         if (from == 3 && to == 2) return 6;
         if (from == 0 && to == 3) return 7;
 
-        return 0; 
+        return 0;
     }
+
+    // Keeps rotationIndex between 0 and 3
     private int Wrap(int input, int min, int max)
     {
         if (input < min)
@@ -174,7 +229,7 @@ public class Block : MonoBehaviour
         }
         else
         {
-            return min - (input - min) % (max - min);
+            return min + (input - min) % (max - min);
         }
     }
 }
