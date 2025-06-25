@@ -1,4 +1,3 @@
-using Unity.Android.Gradle.Manifest; // Likely unnecessary – probably left in by accident
 using UnityEngine;
 using UnityEngine.UIElements;
 
